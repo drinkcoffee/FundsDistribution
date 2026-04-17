@@ -62,5 +62,5 @@ bash script/deploy.sh
 
 | Contract           | Environment | Address                          |
 |--------------------|-------------|----------------------------------|
-| ERC1967 Proxy      | Testnet     | [0x9d4ab1350495a1d8f6148fe15805a9044797e4c0](https://explorer.testnet.immutable.com/address/0x9d4ab1350495a1d8f6148fe15805a9044797e4c0) |
-| FundsDistributor   | Testnet     | [0x87a7096b3c39c9d533bdeeb34013dc21ed0cd7cf](https://explorer.testnet.immutable.com/address/0x87a7096b3c39c9d533bdeeb34013dc21ed0cd7cf) |
+| ERC1967 Proxy      | Testnet     | [0x2777dc1b338272d74715e6a42c06a2fbde00252b](https://explorer.testnet.immutable.com/address/0x2777dc1b338272d74715e6a42c06a2fbde00252b) |
+| FundsDistributor   | Testnet     | [0x127b9c228d706ad17f77fc0cf229c35ed80e2e91](https://explorer.testnet.immutable.com/address/0x127b9c228d706ad17f77fc0cf229c35ed80e2e91) |
