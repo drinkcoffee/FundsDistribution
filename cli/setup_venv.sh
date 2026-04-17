@@ -11,6 +11,6 @@ pip install --upgrade pip
 pip install -r "$SCRIPT_DIR/requirements.txt"
 
 echo ""
-echo "Virtual environment ready at $VENV_DIR"
+echo "Virtual environment created at $VENV_DIR"
 echo "Activate it with:  source .venv/bin/activate"
 echo "Then run:          python fundsdist.py"
