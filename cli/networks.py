@@ -75,6 +75,17 @@ IMMUTABLE_TESTNET = Network(
     },
 )
 
+ETHEREUM = Network(
+    name="Ethereum",
+    rpc_url="https://rpc.flashbots.net/fast",
+    distributor_address="0x0000000000000000000000000000000000000000",
+    fireblocks_asset_id="ETH",
+    token_addresses={
+        USDC.symbol: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    },
+)
+
 NETWORKS: dict[str, Network] = {
     IMMUTABLE_TESTNET.name: IMMUTABLE_TESTNET,
+    ETHEREUM.name: ETHEREUM,
 }
