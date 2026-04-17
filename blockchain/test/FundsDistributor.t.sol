@@ -17,6 +17,10 @@ contract MockERC20 is ERC20 {
     }
 }
 
+contract RejectEth {
+    // No receive() or fallback() — any ETH transfer to this contract reverts.
+}
+
 contract FundsDistributorTest is Test {
     /// @dev Mirrors `FundsDistributor` events for `vm.expectEmit` topic/data checks.
     event TokenAdded(address indexed token);
@@ -127,6 +131,39 @@ contract FundsDistributorTest is Test {
         distributor.removeToken(address(0));
     }
 
+    function test_RemoveToken_RevertsWhenTokenNotApproved() public {
+        MockERC20 token = new MockERC20("Pay Token", "PAY");
+
+        vm.expectRevert(FundsDistributor.TokenNotApproved.selector);
+        vm.prank(admin);
+        distributor.removeToken(address(token));
+    }
+
+    function test_AddToken_RevertsWhenAlreadyApproved() public {
+        MockERC20 token = new MockERC20("Pay Token", "PAY");
+        vm.startPrank(admin);
+        distributor.addToken("Pay Token", address(token));
+
+        vm.expectRevert(FundsDistributor.TokenAlreadyApproved.selector);
+        distributor.addToken("Pay Token", address(token));
+        vm.stopPrank();
+    }
+
+    function test_AddTokenNoName_ApprovesToken() public {
+        MockERC20 token = new MockERC20("Pay Token", "PAY");
+        vm.expectEmit(true, false, false, true, address(distributor));
+        emit TokenAdded(address(token));
+        vm.prank(admin);
+        distributor.addToken(address(token));
+        assertTrue(distributor.approvedToken(address(token)));
+    }
+
+    function test_AddTokenNoName_RevertsWhenTokenZero() public {
+        vm.expectRevert(FundsDistributor.ZeroAddress.selector);
+        vm.prank(admin);
+        distributor.addToken(address(0));
+    }
+
     function test_Distribute_TransfersFromCallerToRecipients() public {
         MockERC20 token = new MockERC20("Pay Token", "PAY");
         address alice = address(0xA1);
@@ -154,6 +191,18 @@ contract FundsDistributorTest is Test {
         assertEq(token.balanceOf(alice), 100e18);
         assertEq(token.balanceOf(bob), 200e18);
         assertEq(token.balanceOf(distributorWallet), 0);
+    }
+
+    function test_Distribute_RevertsWhenNoRecipients() public {
+        MockERC20 token = new MockERC20("Pay Token", "PAY");
+        vm.prank(admin);
+        distributor.addToken("Pay Token", address(token));
+
+        FundsDistributor.Recipient[] memory recipients = new FundsDistributor.Recipient[](0);
+
+        vm.expectRevert(FundsDistributor.NoRecipients.selector);
+        vm.prank(distributorWallet);
+        distributor.distribute(address(token), recipients);
     }
 
     function test_Distribute_RevertsWhenTokenNotApproved() public {
@@ -256,6 +305,125 @@ contract FundsDistributorTest is Test {
         );
         vm.prank(distributorWallet);
         distributor.distribute(address(token), recipients);
+    }
+
+    function test_DistributeEth_SendsEthToRecipients() public {
+        address alice = address(0xA1);
+        address bob = address(0xA2);
+        vm.deal(distributorWallet, 3 ether);
+
+        FundsDistributor.Recipient[] memory recipients = new FundsDistributor.Recipient[](2);
+        recipients[0] = FundsDistributor.Recipient({addr: alice, amount: 1 ether});
+        recipients[1] = FundsDistributor.Recipient({addr: bob, amount: 2 ether});
+
+        vm.expectEmit(true, false, false, true, address(distributor));
+        emit Distributed(address(0), 3 ether, 2);
+        vm.prank(distributorWallet);
+        distributor.distributeEth{value: 3 ether}(recipients);
+
+        assertEq(alice.balance, 1 ether);
+        assertEq(bob.balance, 2 ether);
+        assertEq(distributorWallet.balance, 0);
+    }
+
+    function test_DistributeEth_RevertsWhenNoRecipients() public {
+        vm.deal(distributorWallet, 1 ether);
+        FundsDistributor.Recipient[] memory recipients = new FundsDistributor.Recipient[](0);
+
+        vm.expectRevert(FundsDistributor.NoRecipients.selector);
+        vm.prank(distributorWallet);
+        distributor.distributeEth{value: 0}(recipients);
+    }
+
+    function test_DistributeEth_RevertsWhenRecipientZero() public {
+        vm.deal(distributorWallet, 1 ether);
+        FundsDistributor.Recipient[] memory recipients = new FundsDistributor.Recipient[](1);
+        recipients[0] = FundsDistributor.Recipient({addr: address(0), amount: 1 ether});
+
+        vm.expectRevert(FundsDistributor.ZeroAddress.selector);
+        vm.prank(distributorWallet);
+        distributor.distributeEth{value: 1 ether}(recipients);
+    }
+
+    function test_DistributeEth_RevertsWhenAmountZero() public {
+        vm.deal(distributorWallet, 1 ether);
+        FundsDistributor.Recipient[] memory recipients = new FundsDistributor.Recipient[](1);
+        recipients[0] = FundsDistributor.Recipient({addr: address(0xC0), amount: 0});
+
+        vm.expectRevert(FundsDistributor.ZeroAmount.selector);
+        vm.prank(distributorWallet);
+        distributor.distributeEth{value: 0}(recipients);
+    }
+
+    function test_DistributeEth_RevertsWhenIncorrectEthValue() public {
+        vm.deal(distributorWallet, 1 ether);
+        FundsDistributor.Recipient[] memory recipients = new FundsDistributor.Recipient[](1);
+        recipients[0] = FundsDistributor.Recipient({addr: address(0xC0), amount: 1 ether});
+
+        vm.expectRevert(
+            abi.encodeWithSelector(FundsDistributor.IncorrectEthValue.selector, uint256(0.5 ether), uint256(1 ether))
+        );
+        vm.prank(distributorWallet);
+        distributor.distributeEth{value: 0.5 ether}(recipients);
+    }
+
+    function test_DistributeEth_RevertsWhenCallerLacksDistributeRole() public {
+        vm.deal(outsider, 1 ether);
+        FundsDistributor.Recipient[] memory recipients = new FundsDistributor.Recipient[](1);
+        recipients[0] = FundsDistributor.Recipient({addr: address(0xC0), amount: 1 ether});
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                outsider,
+                distributor.DISTRIBUTE_ROLE()
+            )
+        );
+        vm.prank(outsider);
+        distributor.distributeEth{value: 1 ether}(recipients);
+    }
+
+    function test_DistributeEth_RevertsWhenRecipientRejectsEth() public {
+        RejectEth rejecter = new RejectEth();
+        vm.deal(distributorWallet, 1 ether);
+
+        FundsDistributor.Recipient[] memory recipients = new FundsDistributor.Recipient[](1);
+        recipients[0] = FundsDistributor.Recipient({addr: address(rejecter), amount: 1 ether});
+
+        vm.expectRevert(
+            abi.encodeWithSelector(FundsDistributor.EthTransferFailed.selector, address(rejecter))
+        );
+        vm.prank(distributorWallet);
+        distributor.distributeEth{value: 1 ether}(recipients);
+    }
+
+    function test_Version_IsSetToVersion1AfterInitialize() public view {
+        assertEq(distributor.version(), distributor.VERSION1());
+        assertEq(distributor.version(), 1);
+    }
+
+    function test_UpgradeStorage_RevertsWithDoNotNeedToUpgradeStorage() public {
+        vm.expectRevert(FundsDistributor.DoNotNeedToUpgradeStorage.selector);
+        distributor.upgradeStorage("");
+    }
+
+    function test_Upgrade_SucceedsWithUpgradeRole() public {
+        FundsDistributor newImpl = new FundsDistributor();
+        vm.prank(upgrader);
+        distributor.upgradeToAndCall(address(newImpl), "");
+    }
+
+    function test_Upgrade_RevertsWhenCallerLacksUpgradeRole() public {
+        FundsDistributor newImpl = new FundsDistributor();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                outsider,
+                distributor.UPGRADE_ROLE()
+            )
+        );
+        vm.prank(outsider);
+        distributor.upgradeToAndCall(address(newImpl), "");
     }
 
     function test_GetApprovedTokens_ReturnsEmptyInitially() public view {
