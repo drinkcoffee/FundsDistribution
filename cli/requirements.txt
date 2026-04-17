@@ -1,2 +1,4 @@
 # fundsdist dependencies
-# (currently uses stdlib only; add third-party packages here as needed)
+web3
+PyJWT
+cryptography
