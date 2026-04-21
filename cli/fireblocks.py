@@ -72,6 +72,35 @@ class FireblocksClient:
         response.raise_for_status()
         return response.json()
 
+    def submit_approve(
+        self,
+        vault_id: str,
+        token_asset_id: str,
+        spender_address: str,
+        amount: str,
+        note: str,
+    ) -> TransactionResponse:
+        """Submit a token APPROVE transaction request to Fireblocks."""
+        body = {
+            "operation": "APPROVE",
+            "source": {
+                "type": "VAULT_ACCOUNT",
+                "id": vault_id,
+            },
+            "destination": {
+                "type": "ONE_TIME_ADDRESS",
+                "oneTimeAddress": {"address": spender_address},
+            },
+            "assetId": token_asset_id,
+            "amount": amount,
+            "note": note,
+        }
+        result = self._post("/v1/transactions", body)
+        return TransactionResponse(
+            transaction_id=result["id"],
+            status=result["status"],
+        )
+
     def submit_contract_call(
         self,
         vault_id: str,

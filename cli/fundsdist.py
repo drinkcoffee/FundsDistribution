@@ -6,9 +6,13 @@ import csv
 import os
 import sys
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from dotenv import load_dotenv
 from web3 import Web3
+
+load_dotenv()
 
 from fireblocks import FireblocksClient
 from networks import FUNDS_DISTRIBUTOR_ABI, NETWORKS, Network
@@ -219,6 +223,81 @@ def _remove_token(network: Network, token_address: str, symbol: str, confirm: bo
     _fireblocks_submit(network, calldata, note)
 
 
+def _sum_amounts(transfers: list[Transfer]) -> Decimal:
+    total = Decimal(0)
+    for t in transfers:
+        try:
+            total += Decimal(t.amount)
+        except InvalidOperation:
+            raise ValueError(f"Invalid amount '{t.amount}' for recipient '{t.recipient}'")
+    return total
+
+
+def _approve(dist: DistributionFile, confirm: bool = True) -> None:
+    network = NETWORKS.get(dist.network)
+    if network is None:
+        print(f"Unknown network '{dist.network}'. Available: {', '.join(NETWORKS)}")
+        return
+
+    if dist.token not in network.token_addresses:
+        print(f"Token '{dist.token}' not found on {network.name}. Known: {', '.join(network.token_addresses)}")
+        return
+
+    token_fb_asset_id = network.token_fireblocks_asset_ids.get(dist.token)
+    if not token_fb_asset_id:
+        print(f"No Fireblocks asset ID configured for {dist.token} on {network.name}.")
+        return
+
+    if not dist.transfers:
+        print("No transfer rows in CSV — nothing to approve.")
+        return
+
+    try:
+        total = _sum_amounts(dist.transfers)
+    except ValueError as exc:
+        print(f"Error calculating total: {exc}")
+        return
+
+    total_str = str(total)
+    token_address = network.token_addresses[dist.token]
+    note = f"Approve {total_str} {dist.token} for FundsDistributor on {network.name}: {dist.note}"
+
+    print(f"\n  Network     : {network.name}")
+    print(f"  Token       : {dist.token} ({token_address})")
+    print(f"  Spender     : {network.distributor_address}")
+    print(f"  Total amount: {total_str}")
+    print(f"  Note        : {note}")
+
+    if confirm:
+        if input("\nSubmit to Fireblocks? (yes/no): ").strip().lower() not in ("yes", "y"):
+            print("Cancelled.")
+            return
+
+    vault_id = os.environ.get("FIREBLOCKS_VAULT_ID")
+    if not vault_id:
+        print("FIREBLOCKS_VAULT_ID environment variable is not set.")
+        return
+    try:
+        client = FireblocksClient.from_env()
+        tx = client.submit_approve(
+            vault_id=vault_id,
+            token_asset_id=token_fb_asset_id,
+            spender_address=network.distributor_address,
+            amount=total_str,
+            note=note,
+        )
+    except EnvironmentError as exc:
+        print(f"Configuration error: {exc}")
+        return
+    except Exception as exc:
+        print(f"Fireblocks request failed: {exc}")
+        return
+    print(f"\nTransaction submitted.")
+    print(f"  ID     : {tx.transaction_id}")
+    print(f"  Status : {tx.status}")
+    print()
+
+
 # ---------------------------------------------------------------------------
 # Interactive menu helpers
 # ---------------------------------------------------------------------------
@@ -365,29 +444,41 @@ DIST_MENU = """
   Dist
 -----------------------------
   1  Check CSV file
+  2  Approve
   0  Back
 -----------------------------
 Choice: """
 
 
-def dist_check() -> None:
+def _load_csv_interactive() -> "DistributionFile | None":
     raw = input("Enter path to CSV file: ").strip()
     if not raw:
         print("No path entered.")
-        return
+        return None
     path = Path(raw).expanduser()
     if not path.exists():
         print(f"File not found: {path}")
-        return
+        return None
     if not path.is_file():
         print(f"Not a file: {path}")
-        return
+        return None
     try:
-        dist = load_csv(path)
+        return load_csv(path)
     except (ValueError, IndexError, csv.Error) as exc:
         print(f"Error reading CSV: {exc}")
-        return
-    dump_distribution(dist)
+        return None
+
+
+def dist_check() -> None:
+    dist = _load_csv_interactive()
+    if dist is not None:
+        dump_distribution(dist)
+
+
+def dist_approve() -> None:
+    dist = _load_csv_interactive()
+    if dist is not None:
+        _approve(dist)
 
 
 def menu_dist() -> None:
@@ -395,10 +486,12 @@ def menu_dist() -> None:
         choice = input(DIST_MENU).strip()
         if choice == "1":
             dist_check()
+        elif choice == "2":
+            dist_approve()
         elif choice in ("0", "b", "back"):
             return
         else:
-            print(f"Unknown option: '{choice}'. Enter 1 or 0.")
+            print(f"Unknown option: '{choice}'. Enter 1, 2, or 0.")
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +577,19 @@ def cmd_dist_check(args: argparse.Namespace) -> None:
     dump_distribution(dist)
 
 
+def cmd_dist_approve(args: argparse.Namespace) -> None:
+    path = Path(args.file).expanduser()
+    if not path.exists():
+        print(f"File not found: {path}")
+        sys.exit(1)
+    try:
+        dist = load_csv(path)
+    except (ValueError, IndexError, csv.Error) as exc:
+        print(f"Error reading CSV: {exc}")
+        sys.exit(1)
+    _approve(dist, confirm=not args.yes)
+
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -526,6 +632,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p = dist_sub.add_parser("check", help="Parse and display a distribution CSV file.")
     p.add_argument("file", help="Path to the CSV file.")
 
+    p = dist_sub.add_parser("approve", help="Submit a token APPROVE transaction via Fireblocks.")
+    p.add_argument("file", help="Path to the CSV file.")
+    p.add_argument("--yes", action="store_true", help="Skip confirmation prompt.")
+
     return parser
 
 
@@ -550,6 +660,7 @@ _CLI_DISPATCH = {
     ("admin", "add"):      cmd_admin_add,
     ("admin", "remove"):   cmd_admin_remove,
     ("dist",  "check"):    cmd_dist_check,
+    ("dist",  "approve"):  cmd_dist_approve,
 }
 
 
@@ -560,14 +671,15 @@ fundsdist — Funds Distribution CLI
 
 INTERACTIVE MENU
   1  Admin  →  list / add / remove approved tokens
-  2  Dist   →  check a distribution CSV file
+  2  Dist   →  check a distribution CSV file, approve token spend
 
 COMMAND-LINE USAGE
   fundsdist admin networks
   fundsdist admin list   --network NAME
   fundsdist admin add    --network NAME --token SYMBOL_OR_ADDRESS [--yes]
   fundsdist admin remove --network NAME --token SYMBOL_OR_ADDRESS [--yes]
-  fundsdist dist  check  <file>
+  fundsdist dist  check   <file>
+  fundsdist dist  approve <file> [--yes]
 
 Run any subcommand with --help for full argument details.
 """)

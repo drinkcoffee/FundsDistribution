@@ -14,7 +14,8 @@ class Network:
     rpc_url: str
     distributor_address: str
     fireblocks_asset_id: str       # native gas token asset ID as labelled in Fireblocks
-    token_addresses: dict[str, str]  # symbol -> address for this network
+    token_addresses: dict[str, str]  # symbol -> contract address for this network
+    token_fireblocks_asset_ids: dict[str, str]  # symbol -> Fireblocks asset ID for ERC-20 tokens
 
     def token_address(self, symbol: str) -> str:
         """Return the address for a token symbol on this network, raising KeyError if not found."""
@@ -73,6 +74,9 @@ IMMUTABLE_TESTNET = Network(
     token_addresses={
         USDC.symbol: "0x3B2d8A1931736Fc321C24864BceEe981B11c3c57",
     },
+    token_fireblocks_asset_ids={
+        USDC.symbol: "USDC_IMX_TEST",
+    },
 )
 
 ETHEREUM = Network(
@@ -82,6 +86,9 @@ ETHEREUM = Network(
     fireblocks_asset_id="ETH",
     token_addresses={
         USDC.symbol: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    },
+    token_fireblocks_asset_ids={
+        USDC.symbol: "USDC",
     },
 )
 
